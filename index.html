@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Loading Entity Shares...</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f4f4f4;
+            color: #333;
+            line-height: 1.6;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: #fff;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        h1 {
+            color: #0056b3;
+            border-bottom: 2px solid #eee;
+            padding-bottom: 10px;
+            margin-bottom: 20px;
+        }
+        .data-section {
+            margin-bottom: 25px;
+            padding: 15px;
+            background-color: #e9f7ef;
+            border-left: 5px solid #28a745;
+            border-radius: 4px;
+        }
+        .data-section h2 {
+            color: #28a745;
+            margin-top: 0;
+            margin-bottom: 10px;
+        }
+        .data-section p {
+            font-size: 1.1em;
+            margin: 5px 0;
+        }
+        .data-section strong {
+            color: #0056b3;
+        }
+        .footer {
+            margin-top: 30px;
+            text-align: center;
+            font-size: 0.9em;
+            color: #777;
+        }
+        .error {
+            color: #dc3545;
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+            padding: 10px;
+            border-radius: 4px;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 id="share-entity-name">Loading Entity Shares...</h1>
+
+        <div id="loading-message" style="display: none;">
+            <p>Loading data...</p>
+        </div>
+
+        <div id="error-message" class="error" style="display: none;">
+            <p>An error occurred while fetching data. Please try again later or check the console for details.</p>
+            <p><strong>Note:</strong> When fetching data for a custom CIK, a CORS proxy is used. If you encounter issues, the proxy might be unavailable or rate-limited. For local development, you might need to run a local CORS proxy or ensure your browser allows insecure content on HTTP pages if you're fetching from HTTPS.</p>
+            <p>Also, the SEC requires a descriptive User-Agent. This is handled by the proxy when fetching via URL parameter. For `data.json`, it's a static file.</p>
+        </div>
+
+        <div id="content" style="display: none;">
+            <div class="data-section">
+                <h2>Maximum Shares Outstanding</h2>
+                <p>Value: <strong id="share-max-value"></strong></p>
+                <p>Fiscal Year: <strong id="share-max-fy"></strong></p>
+            </div>
+
+            <div class="data-section">
+                <h2>Minimum Shares Outstanding</h2>
+                <p>Value: <strong id="share-min-value"></strong></p>
+                <p>Fiscal Year: <strong id="share-min-fy"></strong></p>
+            </div>
+        </div>
+
+        <div class="footer">
+            <p>Data provided by SEC EDGAR API.</p>
+            <p>For Citizens Financial Group, Inc. (CIK 0000759944) by default.</p>
+            <p>Append <code>?CIK=0001018724</code> to the URL to view data for another company (e.g., Apple Inc.).</p>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const defaultCik = '0000759944'; // Citizens Financial Group
+            const secApiBaseUrl = 'https://data.sec.gov/api/xbrl/companyconcept/';
+            // Using a public CORS proxy. For production, consider deploying your own
+            // or a more robust solution that sets the User-Agent header correctly.
+            const corsProxy = 'https://api.allorigins.win/raw?url=';
+            
+            const entityNameElem = document.getElementById('share-entity-name');
+            const maxValueElem = document.getElementById('share-max-value');
+            const maxFyElem = document.getElementById('share-max-fy');
+            const minValueElem = document.getElementById('share-min-value');
+            const minFyElem = document.getElementById('share-min-fy');
+            const loadingMessage = document.getElementById('loading-message');
+            const errorMessage = document.getElementById('error-message');
+            const content = document.getElementById('content');
+
+            const urlParams = new URLSearchParams(window.location.search);
+            const cikParam = urlParams.get('CIK');
+
+            async function fetchData(cik) {
+                loadingMessage.style.display = 'block';
+                errorMessage.style.display = 'none';
+                content.style.display = 'none';
+
+                let fetchUrl;
+                if (cik && cik.match(/^\d{10}$/)) { // Validate CIK is 10 digits
+                    fetchUrl = `${corsProxy}${encodeURIComponent(`${secApiBaseUrl}CIK${cik}/dei/EntityCommonStockSharesOutstanding.json`)}`;
+                } else {
+                    fetchUrl = './data.json';
+                }
+
+                try {
+                    const response = await fetch(fetchUrl);
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    const data = await response.json();
+                    processAndRender(data);
+                } catch (error) {
+                    console.error('Fetch error:', error);
+                    entityNameElem.textContent = 'Error Loading Data';
+                    errorMessage.style.display = 'block';
+                    loadingMessage.style.display = 'none';
+                }
+            }
+
+            function processAndRender(data) {
+                const entityName = data.entityName;
+                const sharesData = data.units?.shares || [];
+
+                const filteredShares = sharesData
+                    .filter(item => item.fy && parseInt(item.fy) > 2020 && typeof item.val === 'number')
+                    .map(item => ({ val: item.val, fy: item.fy }));
+
+                if (filteredShares.length === 0) {
+                    document.title = `${entityName} - No Data`;
+                    entityNameElem.textContent = `${entityName} - No relevant share data found (FY > 2020)`;
+                    maxValueElem.textContent = 'N/A';
+                    maxFyElem.textContent = 'N/A';
+                    minValueElem.textContent = 'N/A';
+                    minFyElem.textContent = 'N/A';
+                    loadingMessage.style.display = 'none';
+                    content.style.display = 'block';
+                    return;
+                }
+
+                const maxShare = filteredShares.reduce((prev, current) => (prev.val > current.val) ? prev : current);
+                const minShare = filteredShares.reduce((prev, current) => (prev.val < current.val) ? prev : current);
+
+                // Update title and H1
+                document.title = `${entityName} Shares Outstanding`;
+                entityNameElem.textContent = entityName;
+
+                // Update max values
+                maxValueElem.textContent = maxShare.val.toLocaleString();
+                maxFyElem.textContent = maxShare.fy;
+
+                // Update min values
+                minValueElem.textContent = minShare.val.toLocaleString();
+                minFyElem.textContent = minShare.fy;
+
+                loadingMessage.style.display = 'none';
+                content.style.display = 'block';
+            }
+
+            fetchData(cikParam);
+        });
+    </script>
+</body>
+</html>
